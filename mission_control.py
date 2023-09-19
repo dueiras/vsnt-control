@@ -1,10 +1,11 @@
 import pymoos
 import pyproj
 import time
+import os
 
-IP_MOOS = "localhost" 
-PORTA_MOOS = 9000
-LOCATION = "MIT"
+CONTROLLER_PARAMS_PATH = "/home/dueiras/VSNT/moos-ivp-vsnt/src/planchaPID"
+SPEED_PID_FILE = "speed_pid_parameters.txt"
+HEADING_PID_FILE = "heading_pid_parameters.txt"
 
 class MissionControl(pymoos.comms):
 
@@ -23,9 +24,9 @@ class MissionControl(pymoos.comms):
         self.nav_lat = 0
         self.nav_long = 0
         self.nav_yaw = 0 
-        self.nav_heading = 0
         self.nav_speed = 0
         self.nav_depth = 0
+        self.nav_heading = 0
         self.last_ais_msg = None
         self.view_seglist = None
         self.view_point = None
@@ -33,6 +34,16 @@ class MissionControl(pymoos.comms):
         self.return_var = None
         self.bhv_settings = None # Current behavior
         self.ivphelm_bhv_active = None 
+        
+        #Control variables
+        #Variables used by planchaPID to adjust control in real time
+        self.heading_kp, self.heading_ki, self.heading_kd = self.__get_pid_params(HEADING_PID_FILE)
+        self.speed_kp, self.speed_ki, self.speed_kd = self.__get_pid_params(SPEED_PID_FILE)
+
+        self.constant_heading = False
+        self.setpoint_heading = 0
+        
+        #
 
         self.__set_local_coordinates()
 
@@ -42,6 +53,42 @@ class MissionControl(pymoos.comms):
 
         self.init_time = pymoos.time()
         print(f"Connection status is: {status} at {self.init_time}")
+
+    def __get_pid_params(self,filename):
+        """
+        Reads the PID configuration file for the controller parameters
+        """
+        KP = None
+        KI = None
+        KD = None
+
+        try:
+            # Open the file for reading
+            with open(os.path.join(CONTROLLER_PARAMS_PATH,filename), 'r') as file:
+                lines = file.readlines()
+
+            # Parse each line to extract PID parameters
+            for line in lines:
+                # Split the line at the equal sign
+                parts = line.strip().split('=')
+                if len(parts) == 2:
+                    param_name = parts[0].strip()
+                    param_value = float(parts[1].strip())
+
+                    # Store the parameter values in the corresponding variables
+                    if param_name == 'KP':
+                        KP = param_value
+                    elif param_name == 'KI':
+                        KI = param_value
+                    elif param_name == 'KD':
+                        KD = param_value
+
+        except Exception as e:
+            # Handle any exceptions that may occur during file reading
+            print(f"Error reading PID parameters: {e}")
+
+        return KP, KI, KD
+
 
     def __set_local_coordinates(self):  
         """
@@ -76,7 +123,10 @@ class MissionControl(pymoos.comms):
         self.register('NAV_LAT', 0)
         self.register('NAV_LONG', 0)
         self.register('NAV_HEADING', 0)
+        self.register('DESIRED_HEADING', 0)
+        self.register('DESIRED_RUDDER', 0)
         self.register('NAV_SPEED', 0)
+        self.register('DESIRED_SPEED', 0)
         self.register('NAV_DEPTH', 0)
         self.register('NAV_YAW', 0)
         self.register('MSG_UDP', 0)
@@ -87,6 +137,16 @@ class MissionControl(pymoos.comms):
         self.register('RETURN', 0)
         self.register('DESIRED_RUDDER', 0)
         self.register('DESIRED_THRUST', 0)
+        
+        #Control Parameters variables
+        self.register('SPEED_KP', 0)
+        self.register('SPEED_KI', 0)
+        self.register('SPEED_KD', 0)
+        self.register('HEADING_KP', 0)
+        self.register('HEADING_KI', 0)
+        self.register('HEADING_KD', 0)
+        self.register('CONSTANT_HEADING', 0)
+        self.register('SETPOINT_HEADING', 0)
 
         # Autonomous Navigation Variables
         self.register('VIEW_SEGLIST', 0) 
@@ -113,10 +173,22 @@ class MissionControl(pymoos.comms):
                 self.nav_long = val
             elif msg.name() == 'NAV_HEADING':
                 self.nav_heading = val
+            elif msg.name() == 'DESIRED_HEADING':
+                self.desired_heading = val
+            elif msg.name() == 'SETPOINT_HEADING':
+                self.setpoint_heading = val
+            elif msg.name() == 'DESIRED_RUDDER':
+                self.desired_rudder = val
             elif msg.name() == 'NAV_DEPTH':
                 self.nav_depth = val
             elif msg.name() == 'NAV_SPEED':
                 self.nav_speed = val
+            elif msg.name() == 'DESIRED_SPEED':
+                self.desired_speed = val
+            elif msg.name() == 'DESIRED_THRUST':
+                self.desired_thrust = val
+            elif msg.name() == 'DESIRED_RUDDER':
+                self.desired_rudder = val
             elif msg.name() == 'VIEW_SEGLIST':
                 val = msg.string()
                 self.view_seglist = val
@@ -137,7 +209,25 @@ class MissionControl(pymoos.comms):
                 print(self.ivphelm_bhv_active)
             elif msg.name() == 'RETURN':
                 val = msg.string()
-                self.return_var = val       
+                self.return_var = val      
+            elif msg.name() == 'HEADING_KP':
+                self.heading_kp = val
+            elif msg.name() == 'HEADING_KI':
+                self.heading_ki = val
+            elif msg.name() == 'HEADING_KD':
+                self.heading_kd = val
+            elif msg.name() == 'SPEED_KP':
+                self.speed_kp = val
+            elif msg.name() == 'SPEED_KI':
+                self.speed_ki = val
+            elif msg.name() == 'SPEED_KD':
+                self.speed_kd = val  
+            elif msg.name() == 'CONSTANT_HEADING':
+                self.constant_heading = val
+            elif msg.name() == 'SETPOINT_HEADING':
+                self.setpoint_heading = val       
+            
+                  
 
         return True
     
@@ -188,8 +278,13 @@ class MissionControl(pymoos.comms):
     def convert_global2local(self,points):
         """
         Convert LAT and LONG to local coordinates
+        Returns X, Y local coordinates
         """
-        local_points = [pyproj.transform(self.projection_global, self.projection_local, long, lat) for lat,long in points]
+        try:
+            local_points = [pyproj.transform(self.projection_global, self.projection_local, long, lat) for lat,long in points]
+        except TypeError:
+            points = [points]
+            local_points = [pyproj.transform(self.projection_global, self.projection_local, long, lat) for lat,long in points]
         return local_points
 
     def activate_remote_control(self):
@@ -234,6 +329,9 @@ class MissionControl(pymoos.comms):
         self.notify('DESIRED_SPEED', desired_speed, pymoos.time())
 
 def main():
+    IP_MOOS = "localhost" 
+    PORTA_MOOS = 9000
+    LOCATION = "MIT"
     controller = MissionControl(IP_MOOS, PORTA_MOOS, LOCATION)
 
     global_points = [(43.824840,-70.330388),(43.824853,-70.329767)]

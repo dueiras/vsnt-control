@@ -7,15 +7,21 @@ import socket
 import socket
 import pyproj
 import pymoos
+from collections import deque
 from geopy.distance import geodesic as GD
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 #from auvlib.data_tools import jsf_data, utils
 from tkintermapview import TkinterMapView
 from PIL import Image, ImageTk
 from pyais import decode
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from tkinter import ttk, simpledialog
 from mission_control import MissionControl
+
+#mpl.style.use('seaborn')
+plt.style.use('dark_background')
 
 # Configurations to access Moos server
 
@@ -29,6 +35,10 @@ PORTA_MOOS = 9000
 #LOCATION = "Salvador"
 LOCATION = "Rio de Janeiro"
 #LOCATION = "MIT"
+"""
+xdiff = 
+ydiff = 
+"""
 
 # AIS configuration
 ip_address = '201.76.184.242' 
@@ -45,9 +55,20 @@ Thrust limit for changing gear ###
 The gear will only be changed if thrust < thrust_gear_limit
 """
 thrust_gear_limit = 1
-AUTONOMOUS_SPEED = 5 # meters/s
-MAX_AUTONOMOUS_SPEED = 20 # meters/s
+AUTONOMOUS_SPEED = 5 # knots
+MAX_AUTONOMOUS_SPEED = 10 # knots
 DEGREES_SECONDS = False # GPS notation in Degrees, Minutes, Seconds if True
+
+"""
+Variables for Kp, Ki and Kd control
+"""
+MAX_HEADING_KP = 5
+MAX_HEADING_KI = 3
+MAX_HEADING_KD = 1
+
+MAX_SPEED_KP = 50
+MAX_SPEED_KI = 3
+MAX_SPEED_KD = 1
 
 CONNECTION_OK_COLOR = "#56a152"
 CONNECTION_NOT_OK_COLOR = "#bf7258"
@@ -188,7 +209,7 @@ class App(customtkinter.CTk):
 
         #Texto da veloc
 
-        self.label_speed = customtkinter.CTkLabel(master=self.frame_left, text="Velocidade: "+str(self.controller.nav_speed)+"m/s",)
+        self.label_speed = customtkinter.CTkLabel(master=self.frame_left, text="Velocidade: "+str(self.controller.nav_speed)+"knots",)
         self.label_speed.configure(font=("Segoe UI", 25))
         self.label_speed.grid(row=11, column=0,  padx=(20,20), pady=(20,20), sticky="")
 
@@ -312,9 +333,18 @@ class App(customtkinter.CTk):
         self.autonomous_speed = AUTONOMOUS_SPEED  # meters/s
         self.max_autonomous_speed = MAX_AUTONOMOUS_SPEED
         self.visited_points = []
+        
+        #Variables for control parameters
+        self.max_heading_kp = MAX_HEADING_KP
+        self.max_heading_ki = MAX_HEADING_KI
+        self.max_heading_kd = MAX_HEADING_KD
+        self.max_speed_kp = MAX_SPEED_KP
+        self.max_speed_ki = MAX_SPEED_KI
+        self.max_speed_kd = MAX_SPEED_KD
 
         #Variável auxiliar para ligar AIS da praticagem
         self.check_var = tkinter.StringVar(self,"off")
+        self.check_var_constantheading = tkinter.StringVar(self,"off")
 
         #Auxilio na plotagem dos AIS
         self.marker_list = []
@@ -339,6 +369,9 @@ class App(customtkinter.CTk):
         self.connection_ok = True
         self.trajectory_plot_is_toggled = False
         self.autonomous_control = False
+        self.make_variables_plot = False
+        self.active_animations = []
+        self.selected_plot_variables = []
 
     def __main_loop(self):
         """
@@ -600,12 +633,12 @@ class App(customtkinter.CTk):
         self.slider_progressbar_frame1 = customtkinter.CTkFrame(self, fg_color="transparent",width=400,height=200)
         self.slider_progressbar_frame1.grid(row=0, column=5, padx=(20, 0), pady=(90, 0), sticky="nsew") #Mexer no pady se quiser abaixar mais o frame
         self.slider_progressbar_frame1.grid_columnconfigure(0, weight=1)
-        self.slider_progressbar_frame1.grid_rowconfigure(6, weight=1)
+        self.slider_progressbar_frame1.grid_rowconfigure(24, weight=1)
         
         #Label do Controle Autônomo
         self.label_machine1 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Controle Autônomo")
         self.label_machine1.configure(font=("Segoe UI", 30))
-        self.label_machine1.grid(row=0, column=0, columnspan=2, padx=(50,50), pady=(10,25), sticky="")
+        self.label_machine1.grid(row=0, column=0, columnspan=2, padx=(50,50), pady=(10,5), sticky="")
 
         #Botão para iniciar 
         self.button_inicio_autonomo = customtkinter.CTkButton(master=self.slider_progressbar_frame1,
@@ -630,18 +663,312 @@ class App(customtkinter.CTk):
 
         # Set desired speed for autonomous controller
 
-        self.label_desired_speed = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Desired Speed: {float(self.autonomous_speed)}m/s")
+        self.label_desired_speed = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Desired Speed: {float(self.autonomous_speed)}knots")
         self.label_desired_speed.configure(font=("Segoe UI", 20))
-        self.label_desired_speed.grid(row=3, column=0, columnspan=2, padx=0, pady=(15,15), sticky="")
+        self.label_desired_speed.grid(row=3, column=0, columnspan=2, padx=0, pady=(15,5), sticky="")
         
-        self.slider_speed = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_autonomous_speed, number_of_steps=self.max_autonomous_speed)
-        self.slider_speed.grid(row=4, column=0, columnspan=2, padx=(50, 50), pady=(15, 15), sticky="ew")
+        self.slider_speed = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, 
+                                                    to=self.max_autonomous_speed, 
+                                                    number_of_steps=self.max_autonomous_speed*2)
+        self.slider_speed.grid(row=4, column=0, columnspan=2, padx=(50, 50), pady=(15, 5), sticky="ew")
         self.slider_speed.configure(command=self.update_desired_speed)
         self.slider_speed.set(self.autonomous_speed)
 
         self.speed_progressbar = customtkinter.CTkProgressBar(master=self.slider_progressbar_frame1,width=300)
         self.speed_progressbar.grid(row=5, column=0, columnspan=2, padx=(50, 50), pady=(15, 15), sticky="ew")
         self.speed_progressbar.set(self.controller.nav_speed/self.max_autonomous_speed)
+
+        # Set option for Plotting Variables
+
+        self.button_plot_variables = customtkinter.CTkButton(master=self.slider_progressbar_frame1,
+                                                text="Plot Variables",
+                                                command=self.toggle_plot_variables)
+        self.button_plot_variables.grid(pady=(5, 5), padx=(5, 5), row=6, column=0)        
+
+        # Creates a listbox for selecting multiple variables to plot
+        self.listbox_selection = ('RUDDER PLOT',
+                                  'HEADING PLOT',
+                                  'SPEED PLOT',
+                                  'DEPTH PLOT')
+
+        var = tkinter.Variable(value=self.listbox_selection)
+        # selecmode can be MULTIPLE, SINGLE
+        self.select_list = tkinter.Listbox(master=self.slider_progressbar_frame1,
+                                           listvariable=var,
+                                           height=len(self.listbox_selection),
+                                           selectmode=tkinter.SINGLE)
+        self.select_list.configure(background="#265aad",foreground="white",font=("Segoe UI", 10))
+        self.select_list.grid(pady=(5, 5), padx=(5, 5), row=6, column=1)
+
+        # Binds the variables chosen to an action 
+        self.select_list.bind('<<ListboxSelect>>', self.items_selected) 
+        
+        #Heading automático
+        self.checkbox_heading = customtkinter.CTkCheckBox(master=self.slider_progressbar_frame1, text="Heading Constante", variable=self.check_var_constantheading, onvalue="on", offvalue="off")
+        self.checkbox_heading.grid(row=7, column=0, columnspan=2, padx=(20, 20), pady=(5, 5))
+        self.checkbox_heading.configure(command=self.update_auto_heading)
+        
+        self.label_setpoint_heading = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Rumo: {round(float(self.controller.setpoint_heading),2)}")
+        self.label_setpoint_heading.configure(font=("Segoe UI", 20))
+        self.label_setpoint_heading.grid(row=8, column=0, columnspan=2, padx=(10,0), pady=(0,5), sticky="")
+
+        self.slider_setpoint_heading = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=360, number_of_steps=360)
+        self.slider_setpoint_heading.grid(row=9, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="ew")
+        self.slider_setpoint_heading.configure(command=self.update_setpoint_heading)
+        self.slider_setpoint_heading.set(self.controller.heading_kp)
+        
+        #Parâmetros do controle PID
+        #Label de cima
+        self.label_machine1 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Controle PID Heading")
+        self.label_machine1.configure(font=("Segoe UI", 25))
+        self.label_machine1.grid(row=10, column=0, columnspan=2, padx=(10,20), pady=(10,5), sticky="n")
+        
+        self.label_heading_kp = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"KP: {self.controller.heading_kp:.2f}")
+        self.label_heading_kp.configure(font=("Segoe UI", 20))
+        self.label_heading_kp.grid(row=11, column=0, columnspan=2, padx=(10,0), pady=(0,5), sticky="n")
+        
+        self.slider_heading_kp = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_heading_kp, number_of_steps=100)
+        self.slider_heading_kp.grid(row=12, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_heading_kp.configure(command=self.update_heading_kp)
+        self.slider_heading_kp.set(self.controller.heading_kp)
+        
+        self.label_heading_ki = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"KI: {round(float(self.controller.heading_ki),2)}")
+        self.label_heading_ki.configure(font=("Segoe UI", 20))
+        self.label_heading_ki.grid(row=13, column=0, columnspan=2, padx=0, pady=(5,5), sticky="")
+        
+        self.slider_heading_ki = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_heading_ki, number_of_steps=100)
+        self.slider_heading_ki.grid(row=14, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_heading_ki.configure(command=self.update_heading_ki)
+        self.slider_heading_ki.set(self.controller.heading_ki)
+        
+        self.label_heading_kd = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"KD: {round(float(self.controller.heading_kd),2)}")
+        self.label_heading_kd.configure(font=("Segoe UI", 20))
+        self.label_heading_kd.grid(row=15, column=0, columnspan=2, padx=0, pady=(5,5), sticky="")
+        
+        self.slider_heading_kd = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_heading_kd, number_of_steps=100)
+        self.slider_heading_kd.grid(row=16, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_heading_kd.configure(command=self.update_heading_kd)
+        self.slider_heading_kd.set(self.controller.heading_kd)
+        
+        self.label_machine1 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Controle PID Speed")
+        self.label_machine1.configure(font=("Segoe UI", 25))
+        self.label_machine1.grid(row=17, column=0, columnspan=2, padx=(10,20), pady=(5,5), sticky="n")
+        
+        self.label_speed_kp = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"KP: {round(float(self.controller.speed_kp),2)}")
+        self.label_speed_kp.configure(font=("Segoe UI", 20))
+        self.label_speed_kp.grid(row=18, column=0, columnspan=2, padx=(10,0), pady=(0,5), sticky="n")
+        
+        self.slider_speed_kp = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_speed_kp, number_of_steps=100)
+        self.slider_speed_kp.grid(row=19, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_speed_kp.configure(command=self.update_speed_kp)
+        self.slider_speed_kp.set(self.controller.speed_kp)
+        
+        self.label_speed_ki = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"KI: {round(float(self.controller.speed_ki),2)}")
+        self.label_speed_ki.configure(font=("Segoe UI", 20))
+        self.label_speed_ki.grid(row=20, column=0, columnspan=2, padx=0, pady=(5,5), sticky="")
+        
+        self.slider_speed_ki = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_speed_ki, number_of_steps=100)
+        self.slider_speed_ki.grid(row=21, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_speed_ki.configure(command=self.update_speed_ki)
+        self.slider_speed_ki.set(self.controller.speed_ki)
+        
+        self.label_speed_kd = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"KD: {round(float(self.controller.speed_kd),2)}")
+        self.label_speed_kd.configure(font=("Segoe UI", 20))
+        self.label_speed_kd.grid(row=22, column=0, columnspan=2, padx=0, pady=(5,5), sticky="")
+        
+        self.slider_speed_kd = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=self.max_speed_kd, number_of_steps=100)
+        self.slider_speed_kd.grid(row=23, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_speed_kd.configure(command=self.update_speed_kd)
+        self.slider_speed_kd.set(self.controller.speed_kd)
+        
+    def toggle_plot_variables(self):
+        """
+        Check if USER asked to plot variables
+        """
+        if self.make_variables_plot: # End plot
+            self.button_plot_variables.configure(text=f"Plot Variables")
+            self.make_variables_plot = False
+            for animation in self.active_animations:
+                animation.pause()
+                plt.close()
+                self.active_animations = []
+        else: # Start plot
+            if len(self.selected_plot_variables) > 0:
+                self.make_variables_plot = True
+                self.button_plot_variables.configure(text=f"Close Plot Variables")
+                if len(self.active_animations) > 0:
+                    for animation in self.active_animations:
+                        animation.resume()
+                else:
+                    for plot_type in self.selected_plot_variables:
+                        self.plot_variables(plot_type=plot_type)
+
+    def items_selected(self, event):
+        """
+        Updates the selected variables to plot from the list
+        """
+        selected_indices = self.select_list.curselection()
+        self.selected_plot_variables = [self.listbox_selection[i] for i in selected_indices]
+        print(self.selected_plot_variables)
+
+    def plot_variables(self, plot_type):
+        """
+        Plot Two Variables: var_des, intended for desired control variables
+                            var_nav, the real value for the vessel
+        """    # Clear the previous plot and plot the updated data
+        MAXLEN = 100 # maximum stored values in the queue
+        ALPHA = 0.1 # transparency of plot
+        LINEWIDTH = 1 # line width of plot
+        def animate_heading(i,heading_x_data,
+                            heading_y_des_data,
+                            heading_y_nav_data,
+                            heading_y_out_data):
+            x = time.time() - heading_init_time
+            nav = self.controller.nav_heading
+            if (self.controller.constant_heading == True) or (self.check_var_constantheading.get() == "on"):
+                des = self.controller.setpoint_heading
+            else:
+                des = self.controller.desired_heading
+            out = self.controller.desired_rudder
+
+            heading_x_data.append(x)
+            heading_y_des_data.append(des)
+            heading_y_nav_data.append(nav)
+            heading_y_out_data.append(out)
+
+            plt.cla()
+            axu.clear()
+            axd.clear()
+            axu.plot(heading_x_data, heading_y_nav_data,label="NAV_HEADING")
+            axu.plot(heading_x_data, heading_y_des_data,label="DESIRED_HEADING")
+            axd.set_xlabel('Time [s]')
+            axu.set_ylabel('Value [°]')
+            axu.set_ylim([0,365])
+            axu.legend()
+
+            axd.plot(heading_x_data, heading_y_out_data,label="PID OUTPUT")
+            axd.set_ylabel('Value [°]')
+            axd.set_ylim([-40,40])
+            axd.legend()
+            axu.set_title('Real-time Heading Plot')
+            axd.grid(alpha=ALPHA,linewidth=LINEWIDTH)
+            axu.grid(alpha=ALPHA,linewidth=LINEWIDTH)
+            plt.tight_layout()
+
+        def animate_rudder(i):
+            x = time.time() - rudder_init_time
+            nav = self.controller.nav_yaw
+            des = self.controller.desired_rudder
+
+            rudder_x_data.append(x)
+            rudder_y_des_data.append(des)
+            rudder_y_nav_data.append(nav)
+            plt.cla()
+            plt.plot(rudder_x_data, rudder_y_nav_data,label="NAV_RUDDER")
+            plt.plot(rudder_x_data, rudder_y_des_data,label="DESIRED_RUDDER")
+            plt.xlabel('Time [s]')
+            plt.ylabel('Value [°]')
+            plt.ylim([-45,45])
+            plt.legend()
+            plt.grid(alpha=ALPHA,linewidth=LINEWIDTH)
+            plt.title('Real-time Rudder Plot')
+
+        def animate_speed(i,speed_x_data,
+                            speed_y_des_data,
+                            speed_y_nav_data,
+                            speed_y_out_data):
+            x = time.time() - speed_init_time
+            nav = self.controller.nav_speed
+            des = self.controller.desired_speed
+            out = self.controller.desired_thrust
+
+            speed_x_data.append(x)
+            speed_y_des_data.append(des)
+            speed_y_nav_data.append(nav)
+            speed_y_out_data.append(out)
+
+            plt.cla()
+            axu.clear()
+            axd.clear()
+            axu.plot(speed_x_data, speed_y_nav_data,label="NAV_SPEED")
+            axu.plot(speed_x_data, speed_y_des_data,label="DESIRED_SPEED")
+            axu.set_ylabel('Value [knots]')
+            axu.set_ylim([0,10])
+            axu.grid(alpha=ALPHA,linewidth=LINEWIDTH)
+            axu.legend()
+
+            axd.set_xlabel('Time [s]')
+            axd.plot(speed_x_data, speed_y_out_data,label="PID OUTPUT")
+            axd.set_ylabel('Value %')
+            axd.set_ylim([0,100])
+            axd.legend()
+            axd.grid(alpha=ALPHA,linewidth=LINEWIDTH)
+            axu.set_title('Real-time Speed Plot')
+
+        def animate_depth(i):
+            x = time.time() - depth_init_time
+            nav = self.controller.nav_depth
+
+            depth_x_data.append(x)
+            depth_y_nav_data.append(nav)
+            plt.cla()
+            plt.plot(depth_x_data, depth_y_nav_data,label="NAV_DEPTH")
+            plt.xlabel('Time [s]')
+            plt.ylabel('Value [m]')
+            plt.legend()
+            plt.grid(alpha=ALPHA,linewidth=LINEWIDTH)
+            plt.title('Real-time Depth Plot')
+
+        if plot_type == "RUDDER PLOT":
+            print("\nMaking RUDDER PLOT\n")
+            rudder_x_data = deque(maxlen=MAXLEN)
+            rudder_y_des_data = deque(maxlen=MAXLEN)
+            rudder_y_nav_data = deque(maxlen=MAXLEN)
+            rudder_fig, ax = plt.subplots()
+            rudder_init_time = time.time()
+            self.rudder_plot_animation = FuncAnimation(rudder_fig, animate_rudder, interval=500)
+            self.active_animations.append(self.rudder_plot_animation)
+            plt.show()
+
+        elif plot_type == "SPEED PLOT":
+            print("\nMaking SPEED PLOT\n")
+            speed_x_data = deque(maxlen=MAXLEN)
+            speed_y_des_data = deque(maxlen=MAXLEN)
+            speed_y_nav_data = deque(maxlen=MAXLEN)
+            speed_y_out_data = deque(maxlen=MAXLEN)
+            speed_fig, (axu,axd) = plt.subplots(nrows=2,sharex=True)
+            speed_init_time = time.time()
+            self.speed_plot_animation = FuncAnimation(speed_fig, animate_speed, fargs=(speed_x_data,
+                                                                                             speed_y_des_data,
+                                                                                             speed_y_nav_data,
+                                                                                             speed_y_out_data),interval=500)
+            self.active_animations.append(self.speed_plot_animation)
+            plt.show()
+
+        elif plot_type == "HEADING PLOT":
+            print("\nMaking HEADING PLOT\n")
+            heading_x_data = deque(maxlen=MAXLEN)
+            heading_y_des_data = deque(maxlen=MAXLEN)
+            heading_y_nav_data = deque(maxlen=MAXLEN)
+            heading_y_out_data = deque(maxlen=MAXLEN)
+            heading_fig, (axu,axd) = plt.subplots(nrows=2,sharex=True)
+            heading_init_time = time.time()
+            self.heading_plot_animation = FuncAnimation(heading_fig, animate_heading, fargs=(heading_x_data,
+                                                                                             heading_y_des_data,
+                                                                                             heading_y_nav_data,
+                                                                                             heading_y_out_data),interval=500)
+            self.active_animations.append(self.heading_plot_animation)
+            plt.show()
+
+        elif plot_type == "DEPTH PLOT":
+            print("\nMaking DEPTH PLOT\n")
+            depth_x_data = deque(maxlen=MAXLEN)
+            depth_y_nav_data = deque(maxlen=MAXLEN)
+            depth_fig, ax = plt.subplots()
+            depth_init_time = time.time()
+            self.depth_plot_animation = FuncAnimation(depth_fig, animate_depth, interval=500)
+            self.active_animations.append(self.depth_plot_animation)
+            plt.show()
 
     def update_desired_speed(self,_):
         """
@@ -651,8 +978,87 @@ class App(customtkinter.CTk):
         desired_speed = self.slider_speed.get()
         self.autonomous_speed = desired_speed
         self.controller.set_desired_speed(desired_speed)
-        self.label_desired_speed.configure(text=f"Desired Speed: {self.autonomous_speed}m/s")
+        self.label_desired_speed.configure(text=f"Desired Speed: {self.autonomous_speed}knots")
 
+    def update_heading_kp(self,value):
+        """
+        Updates kp value in the control
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('HEADING_KP',value,pymoos.time())
+        
+        #Update da label
+        self.label_heading_kp.configure(text=f"KP: {self.controller.heading_kp:.2f}")
+        
+    def update_heading_ki(self,value):
+        """
+        Updates ki value in the control
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('HEADING_KI',value,pymoos.time())
+        
+        #Update da label
+        self.label_heading_ki.configure(text=f"KI: {self.controller.heading_ki:.2f}")
+        
+    def update_heading_kd(self,value):
+        """
+        Updates kd value in the control
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('HEADING_KD',value,pymoos.time())
+        
+        #Update da label
+        self.label_heading_kd.configure(text=f"KD: {self.controller.heading_kd:.2f}")
+    
+    def update_speed_kp(self,value):
+        """
+        Updates kp value in the control
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('SPEED_KP',value,pymoos.time())
+        
+        #Update da label
+        self.label_speed_kp.configure(text=f"KP: {self.controller.speed_kp:.2f}")
+        
+    def update_speed_ki(self,value):
+        """
+        Updates ki value in the control
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('SPEED_KI',value,pymoos.time())
+        
+        #Update da label
+        self.label_speed_ki.configure(text=f"KI: {self.controller.speed_ki:.2f}")
+        
+    def update_speed_kd(self,value):
+        """
+        Updates kd value in the control
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('SPEED_KD',value,pymoos.time())
+        
+        #Update da label
+        self.label_speed_kd.configure(text=f"KD: {self.controller.speed_kd:.2f}")
+        
+    def update_setpoint_heading(self,value):
+        """
+        Updates setpoint heading value in the control (Constant Heading)
+        """
+        #Envio para o MOOS o valor da variável
+        self.controller.notify('SETPOINT_HEADING',value,pymoos.time())
+        
+        #Update da label
+        self.label_setpoint_heading.configure(text=f"Rumo: {self.controller.setpoint_heading:.2f}")
+        
+    def update_auto_heading(self):
+        if self.check_var_constantheading.get() == "on":
+            #Liguei o botão do heading constante, seto a variável para true no MOOS
+            #Envio para o MOOS o valor da variável
+            print("constant heading botton on")
+            self.controller.notify('CONSTANT_HEADING','true',pymoos.time())
+        else:
+            self.controller.notify('CONSTANT_HEADING','false',pymoos.time())
+            
     def activate_autonomous(self): 
         """
         Starts autonomous navigation and notifies MOOS
@@ -829,7 +1235,7 @@ class App(customtkinter.CTk):
             self.label_long.configure(text=f"Longitude: {self.controller.nav_long:.6f}")
 
         self.label_heading.configure(text="Rumo: "+str(int(self.controller.nav_heading))+" °")
-        self.label_speed.configure(text="Velocidade: "+str(int(self.controller.nav_speed))+" m/s")
+        self.label_speed.configure(text="Velocidade: "+str(int(self.controller.nav_speed))+" knots")
         self.label_yaw.configure(text="Ângulo Leme: "+str(round(self.controller.nav_yaw,2)))
         if self.connection_ok:
             self.label_connection.configure(text=f"Conexão: {self.connection_ok}",fg_color=(CONNECTION_OK_COLOR))
@@ -842,8 +1248,9 @@ class App(customtkinter.CTk):
 
         if self.autonomous_control:
             self.speed_progressbar.set(self.controller.nav_speed/self.max_autonomous_speed)
-        #self.label_connection.configure(text=f"Conexão: {self.connection_ok}")
-        self.after(1000,self.update_gui)
+
+        # Configure time to re-update GUI
+        self.after(1000,self.update_gui) # 1sec
 
     def add_visited_point(self):
         """
@@ -853,7 +1260,7 @@ class App(customtkinter.CTk):
         points = (self.controller.nav_lat,self.controller.nav_long)
         if len(self.visited_points) > 0:
             dist = GD(points,tuple(self.last_loc_global)).km 
-            if dist > 0.05: # 50 meters
+            if dist > 0.02: # 50 meters
                 #xy = self.controller.convert_global2local((self.controller.nav_lat,self.controller.nav_long))[0]
                 self.visited_points.append(points)
                 self.last_loc_global = points
@@ -937,9 +1344,11 @@ class App(customtkinter.CTk):
         self.slider_progressbar_frame = customtkinter.CTkFrame(self, fg_color="transparent",width=200,height=200)
         self.slider_progressbar_frame.grid(row=0, column=5, padx=(20, 0), pady=(90, 0), sticky="nsew") #Mexer no pady se quiser abaixar mais o frame
         self.slider_progressbar_frame.grid_columnconfigure(0, weight=1)
+        self.slider_progressbar_frame.grid_columnconfigure(2, weight=1)
         self.slider_progressbar_frame.grid_rowconfigure(5, weight=0)
         self.slider_progressbar_frame.grid_rowconfigure(6, weight=2)
         self.slider_progressbar_frame.grid_rowconfigure(1, weight=1)
+        self.slider_progressbar_frame.grid_rowconfigure(11,weight=1)
         
         #Label do Controle Remoto
         self.label_remote = customtkinter.CTkLabel(master=self.slider_progressbar_frame, text="Controle Remoto")
@@ -1017,6 +1426,29 @@ class App(customtkinter.CTk):
                                        values=["Manual", "Joystick"],
                                        command=self.optionmenu_callback)
         self.combobox.grid(row=10, column=0, rowspan=1,columnspan=2, padx=(5,10), pady=(0,205), sticky="")
+
+        # Set option for Plotting Variables
+
+        self.button_plot_variables = customtkinter.CTkButton(master=self.slider_progressbar_frame,
+                                                text="Plot Variables",
+                                                command=self.toggle_plot_variables)
+        self.button_plot_variables.grid(pady=(5, 5), padx=(5, 5), row=10, column=0)        
+
+        # Creates a listbox for selecting multiple variables to plot
+        self.listbox_selection = ('RUDDER PLOT',
+                                  'DEPTH PLOT')
+
+        var = tkinter.Variable(value=self.listbox_selection)
+        # selecmode can be MULTIPLE, SINGLE
+        self.select_list = tkinter.Listbox(master=self.slider_progressbar_frame,
+                                           listvariable=var,
+                                           height=len(self.listbox_selection),
+                                           selectmode=tkinter.SINGLE)
+        self.select_list.configure(background="#265aad",foreground="white",font=("Segoe UI", 10))
+        self.select_list.grid(pady=(5, 5), padx=(5, 5), row=10, column=1)
+
+        # Binds the variables chosen to an action 
+        self.select_list.bind('<<ListboxSelect>>', self.items_selected) 
 
     def gear_value2text(self):
         """
@@ -1251,7 +1683,6 @@ class App(customtkinter.CTk):
 
     def start(self):
         self.mainloop()
-
 
 if __name__ == "__main__":
     app = App()
