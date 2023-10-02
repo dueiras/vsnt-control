@@ -35,10 +35,6 @@ PORTA_MOOS = 9000
 #LOCATION = "Salvador"
 LOCATION = "Rio de Janeiro"
 #LOCATION = "MIT"
-"""
-xdiff = 
-ydiff = 
-"""
 
 # AIS configuration
 ip_address = '201.76.184.242' 
@@ -373,6 +369,12 @@ class App(customtkinter.CTk):
         self.active_animations = []
         self.selected_plot_variables = []
 
+        #Sonar Sweep
+        self.sonar_sweep_angle = 90
+        self.sonar_sweep_height = 300
+        self.sonar_sweep_width = 600
+        self.sonar_sweep_lane_width = 100
+
     def __main_loop(self):
         """
         Main functions to run in the loop
@@ -515,66 +517,19 @@ class App(customtkinter.CTk):
             # Ploto a derrota no mapa
             #path_1 = self.map_widget.set_path([self.marker_autonomous_list[0].position, self.marker_autonomous_list[1].position, (-43.15947614659043, -22.911947446774985), (-43.15947564792508, -22.908967568090326)])
 
-    #Adiciona a varredura sonar no mapa
     def add_sonar_sweep(self,coords):
-        
-        #Transformo coordenadas globais em locais
-        
-        x, y = pyproj.transform(self.projection_global, self.projection_local, coords[1], coords[0])
-        
-        string_varredura_inicial='points=format=lawnmower,x='+str(round(x,2))+',y='+str(round(y,2))+',degs=0,height=500,width=1800,lane_width=150'
-        print(string_varredura_inicial)
-        #Envia a varredura sonar para o MOOS
-        self.controller.notify('WPT_UPDATE', string_varredura_inicial,pymoos.time())
-        
-        print("Enviado para o MOOS -> WPT_UPDATE="+string_varredura_inicial)
-        
-        #Inicia e depois para
-        if self.deploy == 'false' or self.return_var == 'true':
-            self.controller.notify('DEPLOY', 'true',pymoos.time())
-            self.controller.notify('MOOS_MANUAL_OVERIDE', 'false',pymoos.time())
-            self.controller.notify('RETURN', 'false',pymoos.time())
-        self.controller.notify('END', 'false',pymoos.time())
-        #Caso não atualize a varredura, aumentar o delay aqui
-        time.sleep(1)
-        self.controller.notify('END', 'true',pymoos.time())
-        
-        #Após enviar atualiza os pontos na tela
-        
-        #Deleta pontos de indicação da derrota
-        for marker in self.marker_autonomous_list:
-            marker.delete()
-            
-        #Deleta o caminho do mapa
-        self.map_widget.delete_all_path()
-        
-        #Limpo a lista self.pontos_autonomos
-        self.autonomous_points = []
-        
-        #Pega os pontos da variável e cria a nova derrota
-        if self.view_seglist is not None: #Checa se a lista não está vazia
-            #Extrair coordenadas da self.view_seglist
-            start_index = self.view_seglist.find("pts={") + len("pts={")
-            end_index = self.view_seglist.find("}")
-            pts_string = self.view_seglist[start_index:end_index]
-            points = pts_string.split(":")
-
-            # Converte os pontos para coordenadas de mapa e armazena
-            
-            for match in points:
-                match = match.split(",")
-                #Conversão de coordenadas locais para globais
-                inv_longitude, inv_latitude = pyproj.transform(self.projection_local, self.projection_global, float(match[0])-self.diff_x, float(match[1])-self.diff_y)
-
-                #Adiciono os pontos na lista
-                self.autonomous_points.append((inv_latitude, inv_longitude))
-                
-            #Defino o caminho
-            self.path_autonomous = self.map_widget.set_path(self.autonomous_points)
-
-            #Definindo pontos da derrota como markers
-            for ponto in self.autonomous_points:
-                self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text="#"+str(self.autonomous_points.index(ponto)+1)+" Ponto de derrota autônoma"))
+        """
+        Creates a sonar sweep, shows on the map and sends to the controller
+        """
+        # coords is (lat,long), so (y,x)
+        autonomous_points = self.controller.lawnmower(x0=coords[1], 
+                                                      y0=coords[0], 
+                                                      width=self.sonar_sweep_width, 
+                                                      height=self.sonar_sweep_height, 
+                                                      lane_width=self.sonar_sweep_lane_width, 
+                                                      angle=self.sonar_sweep_angle)
+        for coord in autonomous_points:
+            self.add_autonomous_point(coord)
 
     def add_autonomous_point(self,coords):
         """
@@ -594,7 +549,8 @@ class App(customtkinter.CTk):
         #Só adiciona pontos que não estão na lista
         for ponto in self.autonomous_points:
             if ponto not in self.marker_autonomous_list:
-                self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text="#"+str(self.autonomous_points.index(ponto)+1)+" Ponto de derrota autônoma"))
+                #self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text="#"+str(self.autonomous_points.index(ponto)+1)+" Ponto de derrota autônoma"))
+                self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text=f"#{self.autonomous_points.index(ponto)+1}"))
 
     def destroy_autonomous(self):
         """
@@ -750,6 +706,38 @@ class App(customtkinter.CTk):
         self.slider_heading_kd.configure(command=self.update_heading_kd)
         self.slider_heading_kd.set(self.controller.heading_kd)
         
+        #Label de baixo
+        self.label_machine2 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Sonar Sweep")
+        self.label_machine2.configure(font=("Segoe UI", 25))
+        self.label_machine2.grid(row=17, column=0, columnspan=2, padx=(10,20), pady=(5,5), sticky="n")  
+
+        self.label_angle = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Angle: {self.sonar_sweep_angle}")
+        self.label_angle.configure(font=("Segoe UI", 20))
+        self.label_angle.grid(row=18, column=0, columnspan=2, padx=(10,0), pady=(0,5), sticky="n")
+        
+        self.slider_sweep_angle = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=359, number_of_steps=360)
+        self.slider_sweep_angle.grid(row=19, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_sweep_angle.configure(command=self.change_sweep_angle)
+        self.slider_sweep_angle.set(self.sonar_sweep_angle)
+        
+        self.label_width = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Width: {self.sonar_sweep_width}")
+        self.label_width.configure(font=("Segoe UI", 20))
+        self.label_width.grid(row=20, column=0, columnspan=2, padx=0, pady=(5,5), sticky="")
+        
+        self.slider_width = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=2000, number_of_steps=200)
+        self.slider_width.grid(row=21, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_width.configure(command=self.change_sweep_width)
+        self.slider_width.set(self.sonar_sweep_width)
+
+        self.label_height = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Height: {self.sonar_sweep_height}")
+        self.label_height.configure(font=("Segoe UI", 20))
+        self.label_height.grid(row=22, column=0, columnspan=2, padx=0, pady=(5,5), sticky="")
+        
+        self.slider_height = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, to=500, number_of_steps=20)
+        self.slider_height.grid(row=23, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
+        self.slider_height.configure(command=self.change_sweep_height)
+        self.slider_height.set(self.sonar_sweep_height)      
+        """
         self.label_machine1 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Controle PID Speed")
         self.label_machine1.configure(font=("Segoe UI", 25))
         self.label_machine1.grid(row=17, column=0, columnspan=2, padx=(10,20), pady=(5,5), sticky="n")
@@ -780,6 +768,7 @@ class App(customtkinter.CTk):
         self.slider_speed_kd.grid(row=23, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
         self.slider_speed_kd.configure(command=self.update_speed_kd)
         self.slider_speed_kd.set(self.controller.speed_kd)
+        """
         
     def toggle_plot_variables(self):
         """
@@ -1043,6 +1032,24 @@ class App(customtkinter.CTk):
         #Update da label
         self.label_speed_kd.configure(text=f"KD: {self.controller.speed_kd:.2f}")
         
+    def change_sweep_angle(self,value):
+        """
+        """
+        self.sonar_sweep_angle = value
+        self.label_angle.configure(text=f"Angle: {self.sonar_sweep_angle}")
+
+    def change_sweep_height(self,value):
+        """
+        """
+        self.sonar_sweep_height = value
+        self.label_height.configure(text=f"Height: {self.sonar_sweep_height}")
+
+    def change_sweep_width(self,value):
+        """
+        """
+        self.sonar_sweep_width = value
+        self.label_width.configure(text=f"Width: {self.sonar_sweep_width}")
+
     def update_setpoint_heading(self,value):
         """
         Updates setpoint heading value in the control (Constant Heading)
@@ -1096,8 +1103,9 @@ class App(customtkinter.CTk):
         self.path_autonomous.set_position_list(self.autonomous_points)
         
         for ponto in self.autonomous_points:
-            self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text="#"+str(self.autonomous_points.index(ponto)+1)+" Ponto de derrota autônoma"))
-    
+            #self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text="#"+str(self.autonomous_points.index(ponto)+1)+" Ponto de derrota autônoma"))
+            self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text=f"#{self.autonomous_points.index(ponto)+1}"))
+
     def clean_autonomous(self):
         """
         Clean the current Autonomous Path from the map
@@ -1106,6 +1114,8 @@ class App(customtkinter.CTk):
         # Delete created path
         #self.map_widget.delete_all_path()
         self.path_autonomous.delete()
+        self.path_autonomous.set_position_list([])
+        del self.path_autonomous
 
         # Remove points from the list
         for marker in self.marker_autonomous_list:
@@ -1263,7 +1273,7 @@ class App(customtkinter.CTk):
         points = (self.controller.nav_lat,self.controller.nav_long)
         if len(self.visited_points) > 0:
             dist = GD(points,tuple(self.last_loc_global)).km 
-            if dist > 0.02: # 50 meters
+            if dist > 0.02: # 20 meters
                 #xy = self.controller.convert_global2local((self.controller.nav_lat,self.controller.nav_long))[0]
                 self.visited_points.append(points)
                 self.last_loc_global = points

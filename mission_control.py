@@ -2,6 +2,7 @@ import pymoos
 import pyproj
 import time
 import os
+from math import sin, cos, pi, radians
 
 CONTROLLER_PARAMS_PATH = "/home/dueiras/VSNT/moos-ivp-vsnt/src/planchaPID"
 SPEED_PID_FILE = "speed_pid_parameters.txt"
@@ -52,7 +53,7 @@ class MissionControl(pymoos.comms):
         status = self.run(self.server, self.port, self.name)
 
         self.init_time = pymoos.time()
-        print(f"Connection status is: {status} at {self.init_time}")
+        #print(f"Connection status is: {status} at {self.init_time}")
 
     def __get_pid_params(self,filename):
         """
@@ -233,6 +234,10 @@ class MissionControl(pymoos.comms):
     
     def set_navigation_path(self, global_points, desired_speed):
         """
+        global_points: tuple
+        desired_speed: float
+
+
         Sends the desired navigation path to pHelmIVP
         It sets DEPLOY to true and MOOS_MANUAL_OVERIDE to false so it can
         start autonomous navigation
@@ -270,9 +275,17 @@ class MissionControl(pymoos.comms):
 
     def convert_local2global(self,points):
         """
-        Convert the local coordinates to global LAT and LONG
+        Convert the local x,y coordinates to global LAT and LONG
+        RETURNS: LAT,LONG
         """
-        global_points = [pyproj.transform(self.projection_local, self.projection_global, long, lat) for lat,long in points]
+        DIFF_LAT = 0
+        DIFF_LONG = 0    
+        # RETURNS: long,lat
+        inv_global_points = [pyproj.transform(self.projection_local, self.projection_global, long, lat) for long,lat in points] # poinst are in x,y
+        global_points = []
+        for point in inv_global_points:
+            # point = (long,lat) = (x,y)
+            global_points.append((point[1]-DIFF_LAT,point[0]-DIFF_LONG)) # lat, long
         return global_points
     
     def convert_global2local(self,points):
@@ -280,11 +293,13 @@ class MissionControl(pymoos.comms):
         Convert LAT and LONG to local coordinates
         Returns X, Y local coordinates
         """
+        DIFF_LAT = 0.0002
+        DIFF_LONG = 0.0003
         try:
-            local_points = [pyproj.transform(self.projection_global, self.projection_local, long, lat) for lat,long in points]
+            local_points = [pyproj.transform(self.projection_global, self.projection_local, long+DIFF_LONG, lat+DIFF_LAT) for lat,long in points]
         except TypeError:
             points = [points]
-            local_points = [pyproj.transform(self.projection_global, self.projection_local, long, lat) for lat,long in points]
+            local_points = [pyproj.transform(self.projection_global, self.projection_local, long+DIFF_LONG, lat+DIFF_LAT) for lat,long in points]
         return local_points
 
     def activate_remote_control(self):
@@ -328,8 +343,59 @@ class MissionControl(pymoos.comms):
         """
         self.notify('DESIRED_SPEED', desired_speed, pymoos.time())
 
-    def lawnmower(self, speed, x0, y0, width, height, lane_width):
-        pass
+    def lawnmower(self, x0, y0, width, height, lane_width, angle=0):
+        """
+        Initialize the trajectory with the starting point (x0,y0)
+        Returns the point for each vertex
+        If angle == 0         
+            -----
+                |
+                |
+            -----
+            |
+          ^ |
+          |  -----
+          y  x ->
+
+        x0,y0 are in GLOBAL coordinates (long,lat)
+        width, height, lane_width are in meters
+        """
+        #local_coords = self.convert_global2local([y0,x0]) #lat, long
+        X0, Y0 = pyproj.transform(self.projection_global, self.projection_local, x0, y0)
+        #X0,Y0 = local_coords[0]
+        trajectory = [(X0, Y0)]
+        angle = radians(angle)
+
+        # Initialize variables for tracking position and direction
+        x, y = X0, Y0
+        direction = 0  # 0: Up, 1: Right, 2: Down, 3: Left
+
+        while width > 0:
+            if direction == 0:  # Move up
+                y += height*sin(angle)
+                x += height*cos(angle)
+                trajectory.append((x, y))
+                direction = 1  # Turn right
+            elif direction == 1:  # Move right
+                x += lane_width*sin(angle)
+                y -= lane_width*cos(angle)
+                trajectory.append((x, y))
+                direction = 2  # Turn down
+            elif direction == 2:  # Move down
+                y -= height*sin(angle)
+                x -= height*cos(angle)
+                trajectory.append((x, y))
+                direction = 3  # Turn right
+            elif direction == 3:  # Move right
+                x += lane_width*sin(angle)
+                y -= lane_width*cos(angle)
+                trajectory.append((x, y))
+                direction = 0  # Turn up
+
+            width -= lane_width
+     
+        global_trajectory = self.convert_local2global(trajectory)
+        return global_trajectory
 
 def main():
     IP_MOOS = "localhost" 
