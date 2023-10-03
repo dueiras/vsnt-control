@@ -1,9 +1,9 @@
 import customtkinter
 import cv2
 import os
+import subprocess
 import tkinter
 import time
-import socket
 import socket
 import pyproj
 import pymoos
@@ -296,15 +296,14 @@ class App(customtkinter.CTk):
         self.checkbox.grid(row=18, column=0, padx=(20, 20), pady=(10, 20))
 
         ###Imagem da camera
-        self.vid = cv2.VideoCapture('teste.mp4')
         """
-            rtsp_url = 'rtsp://172.18.14.214/axis-media/media.amp' #Para usar na lancha
-            self.vid = cv2.VideoCapture(rtsp_url)
-            self.camera_width , self.camera_height = 800,600
+        rtsp_url = 'rtsp://admin:admin1234@172.18.14.155' #Para usar na lancha
+        self.vid = cv2.VideoCapture(rtsp_url)
+        self.camera_width , self.camera_height = 400,300
 
-            # Set the width and height
-            self.vid.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
-            self.vid.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
+        # Set the width and height
+        self.vid.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
+        self.vid.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
         """
 
         # Create a label and display it on app
@@ -373,7 +372,7 @@ class App(customtkinter.CTk):
         self.sonar_sweep_angle = 90
         self.sonar_sweep_height = 300
         self.sonar_sweep_width = 600
-        self.sonar_sweep_lane_width = 100
+        self.sonar_sweep_lane_width = 20
 
     def __main_loop(self):
         """
@@ -1632,6 +1631,10 @@ class App(customtkinter.CTk):
         self.button_4.configure(command=self.destroy_maps,text="Desativar Mapas")
 
     def destroy_camera(self):
+        self.button_3.configure(command=self.open_camera,text="Câmera")
+        self.camera_process.terminate() 
+
+    def __destroy_camera(self):
         self.label_widget.destroy() #Destruo o label da câmera
         self.button_3.configure(command=self.destroy_camera,text="Câmera")
         #Crio o label de novo
@@ -1643,6 +1646,10 @@ class App(customtkinter.CTk):
         self.button_3.configure(command=self.open_camera) #Configuro para abrir a câmera novamente
 
     def open_camera(self):
+        self.button_3.configure(command=self.destroy_camera,text="Desativar Câmera") #Coloco o botão para tirar a câmera
+        self.camera_process = subprocess.Popen("python3 open_camera.py", shell=True)
+
+    def __open_camera(self):
             self.button_3.configure(command=self.destroy_camera,text="Desativar Câmera") #Coloco o botão para tirar a câmera
   
             # Capture the video frame by frame
@@ -1663,7 +1670,7 @@ class App(customtkinter.CTk):
             # Configure image in the label
             self.label_widget.configure(image=photo_image)
         
-            # Repeat the same process after every 10 seconds
+            # Repeat the same process after every 5 seconds
             self.label_widget.after(5, self.open_camera)
 
     def search_event(self, event=None):
