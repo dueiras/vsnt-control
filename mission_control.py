@@ -293,8 +293,10 @@ class MissionControl(pymoos.comms):
         Convert LAT and LONG to local coordinates
         Returns X, Y local coordinates
         """
-        DIFF_LAT = 0.0002
-        DIFF_LONG = 0.0003
+        #DIFF_LAT = 0.0002
+        #DIFF_LONG = 0.0003
+        DIFF_LAT = 0
+        DIFF_LONG = 0
         try:
             local_points = [pyproj.transform(self.projection_global, self.projection_local, long+DIFF_LONG, lat+DIFF_LAT) for lat,long in points]
         except TypeError:

@@ -9,7 +9,7 @@ import pyproj
 import pymoos
 from collections import deque
 from geopy.distance import geodesic as GD
-import matplotlib as mpl
+import matplotlib as mpl    
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 #from auvlib.data_tools import jsf_data, utils
@@ -27,6 +27,7 @@ plt.style.use('dark_background')
 
 IP_MOOS = "127.0.0.1" # Local
 #IP_MOOS = "100.67.139.83" # Vessel's server
+#IP_MOOS = "100.85.104.74" # pedrovsnt
 #IP_MOOS = "192.168.14.138" # Ekren
 #IP_MOOS = "172.18.14.98" # Rasp WIFI
 #IP_MOOS = "100.93.183.81" # Raspberry Pi 4 Tailscale
@@ -1272,7 +1273,7 @@ class App(customtkinter.CTk):
         points = (self.controller.nav_lat,self.controller.nav_long)
         if len(self.visited_points) > 0:
             dist = GD(points,tuple(self.last_loc_global)).km 
-            if dist > 0.02: # 20 meters
+            if dist > 0.01: # 20 meters
                 #xy = self.controller.convert_global2local((self.controller.nav_lat,self.controller.nav_long))[0]
                 self.visited_points.append(points)
                 self.last_loc_global = points
