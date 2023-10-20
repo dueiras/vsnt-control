@@ -7,6 +7,8 @@ import time
 import socket
 import pyproj
 import pymoos
+import pygame
+import threading
 from collections import deque
 from geopy.distance import geodesic as GD
 import matplotlib as mpl    
@@ -26,11 +28,8 @@ plt.style.use('dark_background')
 # Configurations to access Moos server
 
 IP_MOOS = "127.0.0.1" # Local
-#IP_MOOS = "100.67.139.83" # Vessel's server
 #IP_MOOS = "100.85.104.74" # pedrovsnt
-#IP_MOOS = "192.168.14.138" # Ekren
-#IP_MOOS = "172.18.14.98" # Rasp WIFI
-#IP_MOOS = "100.93.183.81" # Raspberry Pi 4 Tailscale
+#IP_MOOS = "172.18.14.100" # pedro rede lancha
 PORTA_MOOS = 9000
 
 #LOCATION = "Salvador"
@@ -54,7 +53,7 @@ The gear will only be changed if thrust < thrust_gear_limit
 thrust_gear_limit = 1
 AUTONOMOUS_SPEED = 5 # knots
 MAX_AUTONOMOUS_SPEED = 10 # knots
-DEGREES_SECONDS = False # GPS notation in Degrees, Minutes, Seconds if True
+DEGREES_SECONDS = True # GPS notation in Degrees, Minutes, Seconds if True
 
 """
 Variables for Kp, Ki and Kd control
@@ -109,6 +108,7 @@ class App(customtkinter.CTk):
         
         self.__init_main_variables()
         self.__init_GUI()
+        self.__init_inputs()
         self.__main_loop()
         self.centralize_ship()
 
@@ -116,6 +116,10 @@ class App(customtkinter.CTk):
         """
         Inits main components of the User interface
         """
+
+        # Init map GUI
+        #subprocess.Popen("maptiler-server --work-dir=/home/dueiras/VSNT/server",shell=True)
+
         #Carrego imagens para os ícones
         self.current_path = os.path.join(os.path.dirname(os.path.abspath(__file__)))
         #Imagem do meu navio
@@ -230,8 +234,11 @@ class App(customtkinter.CTk):
 
         self.map_label = customtkinter.CTkLabel(self.frame_left, text="Servidor de Mapas:", anchor="w")
         self.map_label.grid(row=14, column=0, padx=(20, 20), pady=(20, 0))
-        self.map_option_menu = customtkinter.CTkOptionMenu(self.frame_left, values=["OpenStreetMap", "Google normal", "Google satellite"],
-                                                                       command=self.change_map)
+        self.map_option_menu = customtkinter.CTkOptionMenu(self.frame_left, values=["OpenStreetMap", "Google normal", "Google satellite",
+                                                                                    "1511 - BARRA DO RJ",
+                                                                                    "1512 - PORTO DO RJ",
+                                                                                    "1513 - TERMINAIS DA BAIA DE GUANABARA"],
+                                                                                    command=self.change_map)
         self.map_option_menu.grid(row=15, column=0, padx=(20, 20), pady=(10, 0))
 
         self.appearance_mode_label = customtkinter.CTkLabel(self.frame_left, text="Aparência:", anchor="w")
@@ -253,11 +260,12 @@ class App(customtkinter.CTk):
         self.script_directory = os.path.dirname(os.path.abspath(__file__))
         self.database_path = os.path.join(self.script_directory, "offline_tiles_rio.db")
         #Mapas offline
-        self.map_widget = TkinterMapView(self.frame_right, corner_radius=0,use_database_only=True,database_path=self.database_path)
+        #self.map_widget = TkinterMapView(self.frame_right, corner_radius=0,use_database_only=True,database_path=self.database_path)
         #Mapas online
-        #self.map_widget = TkinterMapView(self.frame_right, corner_radius=0)
+        self.map_widget = TkinterMapView(self.frame_right, corner_radius=0)
         self.map_widget.grid(row=1, rowspan=1, column=0, columnspan=3, sticky="nswe", padx=(0, 0), pady=(0, 0))
-        self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
+        #self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
+        self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1511geotiff/{z}/{x}/{y}")
 
         self.entry = customtkinter.CTkEntry(master=self.frame_right,
                                             placeholder_text="Digite Endereço")
@@ -324,6 +332,7 @@ class App(customtkinter.CTk):
 
     def __init_main_variables(self):
         # Variables for plotting the trajectory
+        self.joystick_process = None
         self.autonomous_points = []
         self.pontos_sonar = []
         self.autonomous_speed = AUTONOMOUS_SPEED  # meters/s
@@ -374,6 +383,61 @@ class App(customtkinter.CTk):
         self.sonar_sweep_height = 300
         self.sonar_sweep_width = 600
         self.sonar_sweep_lane_width = 20
+
+    def joystick_event_handler(self):
+        # Initialize pygame
+        pygame.init()
+        pygame.joystick.init()
+
+        # Initialize the first connected joystick
+        joystick = pygame.joystick.Joystick(0)
+        joystick.init()
+
+        while not self.exit_event.is_set():
+            for event in pygame.event.get():
+                if event.type == pygame.JOYBUTTONDOWN:
+                    button_index = event.button
+                    if button_index == 1:
+                        self.neutral_gear(None)
+                    elif button_index == 0:
+                        self.backward_gear(None)
+                    elif button_index == 3:
+                        self.forward_gear(None)
+                elif event.type == pygame.JOYAXISMOTION:
+                    axis = event.axis
+                    value = event.value
+                    if axis == 5: 
+                        # Thrust
+                        thrust = value + 1
+                        self.joystick_thrust_slider(thrust)
+                    elif axis == 0:
+                        # Rudder
+                        rudder = int(value*40)
+                        self.joystick_rudder_slider(rudder)
+
+
+
+    def __init_inputs(self, joystick = False):
+        """
+        Define user inputs  
+        """
+        if joystick:
+            self.exit_event = threading.Event()
+            self.joystick_process = threading.Thread(target=self.joystick_event_handler)
+            self.joystick_process.start()
+            
+        else:
+            if self.joystick_process is not None:
+                self.exit_event.set()
+                self.joystick_process.join()
+            self.joystick_process = None
+            self.bind("<Up>", self.increment_thrust_slider)
+            self.bind("<Down>", self.decrement_thrust_slider)
+            self.bind("<Left>", self.decrement_rudder_slider)
+            self.bind("<Right>", self.increment_rudder_slider)
+            self.bind("d", self.backward_gear)
+            self.bind("s", self.neutral_gear)
+            self.bind("a", self.forward_gear)  
 
     def __main_loop(self):
         """
@@ -1376,9 +1440,9 @@ class App(customtkinter.CTk):
         self.gear_slider = customtkinter.CTkSlider(master=self.slider_progressbar_frame, from_=-1, to=1, number_of_steps=2, orientation="vertical",height=100)
         self.gear_slider.grid(row=0, column=3, rowspan=5, padx=(10, 15), pady=(20, 10))
 
-        self.bind("d", self.backward_gear)
-        self.bind("s", self.neutral_gear)
-        self.bind("a", self.forward_gear)   
+        #self.bind("d", self.backward_gear)
+        #self.bind("s", self.neutral_gear)
+        #self.bind("a", self.forward_gear)   
 
         #Label do Leme
         self.label_rudder = customtkinter.CTkLabel(master=self.slider_progressbar_frame, text="Leme")
@@ -1390,8 +1454,8 @@ class App(customtkinter.CTk):
         
         self.slider_rudder = customtkinter.CTkSlider(self.slider_progressbar_frame, from_=-40, to=40, number_of_steps=80)
         self.slider_rudder.grid(row=4, column=0, padx=(20, 10), pady=(15, 15), sticky="ew")
-        self.bind("<Left>", self.decrement_rudder_slider) #Configuração para teclas de seta
-        self.bind("<Right>", self.increment_rudder_slider)
+        #self.bind("<Left>", self.decrement_rudder_slider) #Configuração para teclas de seta
+        #self.bind("<Right>", self.increment_rudder_slider)
 
         #Label de Máquina
         self.label_thrust = customtkinter.CTkLabel(master=self.slider_progressbar_frame, text="Máquina")
@@ -1404,8 +1468,8 @@ class App(customtkinter.CTk):
         self.thrust_slider = customtkinter.CTkSlider(self.slider_progressbar_frame, from_=0, to=1, number_of_steps=100, orientation="vertical",height=400)
         self.thrust_slider.grid(row=0, column=1, rowspan=5, padx=(10, 15), pady=(20, 10))
         self.thrust_slider.set(0) #Zero o slider de máquinas
-        self.bind("<Up>", self.increment_thrust_slider)
-        self.bind("<Down>", self.decrement_thrust_slider)
+        #self.bind("<Up>", self.increment_thrust_slider)
+        #self.bind("<Down>", self.decrement_thrust_slider)
 
         # Configurando a barra de progresso
         self.slider_rudder.configure(command=self.update_value_rudder) #Configurei o slider para setar a barra de progresso
@@ -1531,8 +1595,26 @@ class App(customtkinter.CTk):
         self.thrust_slider.set(new_value)
         self.update_value_thrust(new_value)
         
+    def joystick_thrust_slider(self, value):
+        """
+        """
+        self.thrust_slider.set(value)
+        self.update_value_thrust(value)
+
+    def joystick_rudder_slider(self, value):
+        """
+        """
+        self.slider_rudder.set(value)
+        self.update_value_rudder(value)
+
     def optionmenu_callback(self,choice):
+        """
+        """
         print("optionmenu dropdown clicked:", choice)
+        if choice == "Joystick":
+            self.__init_inputs(joystick = True)
+        elif choice == "Manual":
+            self.__init_inputs()
 
     def update_value_thrust(self,other):
         """
@@ -1540,14 +1622,13 @@ class App(customtkinter.CTk):
         """
         value_thrust = int(self.thrust_slider.get()*100)
         self.thrust_progressbar.set(self.thrust_slider.get())
-        print(self.thrust_slider.get())
         self.label_machine.configure(text=str(value_thrust)+"%")
 
         if self.manual_control is True:
             self.controller.notify_thruster(value_thrust)
             print("DESIRED_THRUST: ", value_thrust)
 
-    def update_value_rudder(self,other):
+    def update_value_rudder(self,value):
         """
         Sends to Moos the desired rudder value and updates the GUI
         """
@@ -1635,44 +1716,9 @@ class App(customtkinter.CTk):
         self.button_3.configure(command=self.open_camera,text="Câmera")
         self.camera_process.terminate() 
 
-    def __destroy_camera(self):
-        self.label_widget.destroy() #Destruo o label da câmera
-        self.button_3.configure(command=self.destroy_camera,text="Câmera")
-        #Crio o label de novo
-        self.label_widget = customtkinter.CTkLabel(self,textvariable=self.text_var)
-        if (self.map_widget.winfo_exists() == 1): #Checa se o mapa está ativo
-            self.label_widget.grid(row=0, rowspan=1, column=2, columnspan=3, sticky="nswe")
-        else:
-            self.label_widget.grid(row=0, rowspan=1, column=1, columnspan=3, sticky="nswe")
-        self.button_3.configure(command=self.open_camera) #Configuro para abrir a câmera novamente
-
     def open_camera(self):
         self.button_3.configure(command=self.destroy_camera,text="Desativar Câmera") #Coloco o botão para tirar a câmera
         self.camera_process = subprocess.Popen("python3 open_camera.py", shell=True)
-
-    def __open_camera(self):
-            self.button_3.configure(command=self.destroy_camera,text="Desativar Câmera") #Coloco o botão para tirar a câmera
-  
-            # Capture the video frame by frame
-            _, frame = self.vid.read()
-        
-            # Convert image from one color space to other
-            opencv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
-        
-            # Capture the latest frame and transform to image
-            captured_image = Image.fromarray(opencv_image)
-        
-            # Convert captured image to photoimage
-            photo_image = ImageTk.PhotoImage(image=captured_image)
-        
-            # Displaying photoimage in the label
-            self.label_widget.photo_image = photo_image
-        
-            # Configure image in the label
-            self.label_widget.configure(image=photo_image)
-        
-            # Repeat the same process after every 5 seconds
-            self.label_widget.after(5, self.open_camera)
 
     def search_event(self, event=None):
         self.map_widget.set_address(self.entry.get())
@@ -1698,6 +1744,12 @@ class App(customtkinter.CTk):
         elif new_map == "Google satellite":
             self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22)
             self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
+        elif new_map == "1511 - BARRA DO RJ":
+            self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1511geotiff/{z}/{x}/{y}")
+        elif new_map == "1512 - PORTO DO RJ":
+            self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1512geotiff/{z}/{x}/{y}")
+        elif new_map == "1513 - TERMINAIS DA BAIA DE GUANABARA":
+            self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1513geotiff/{z}/{x}/{y}")
 
     def on_closing(self, event=0):
         self.destroy()
