@@ -27,13 +27,13 @@ plt.style.use('dark_background')
 
 # Configurations to access Moos server
 
-IP_MOOS = "127.0.0.1" # Local
-#IP_MOOS = "100.85.104.74" # pedrovsnt
+#IP_MOOS = "127.0.0.1" # Local
+IP_MOOS = "100.85.104.74" # pedrovsnt
 #IP_MOOS = "172.18.14.100" # pedro rede lancha
 PORTA_MOOS = 9000
 
-#LOCATION = "Salvador"
-LOCATION = "Rio de Janeiro"
+LOCATION = "Salvador"
+#LOCATION = "Rio de Janeiro"
 #LOCATION = "MIT"
 
 # AIS configuration
@@ -235,6 +235,7 @@ class App(customtkinter.CTk):
         self.map_label = customtkinter.CTkLabel(self.frame_left, text="Servidor de Mapas:", anchor="w")
         self.map_label.grid(row=14, column=0, padx=(20, 20), pady=(20, 0))
         self.map_option_menu = customtkinter.CTkOptionMenu(self.frame_left, values=["OpenStreetMap", "Google normal", "Google satellite",
+                                                                                    "1101 - PORTO SALVADOR",
                                                                                     "1511 - BARRA DO RJ",
                                                                                     "1512 - PORTO DO RJ",
                                                                                     "1513 - TERMINAIS DA BAIA DE GUANABARA"],
@@ -265,7 +266,7 @@ class App(customtkinter.CTk):
         self.map_widget = TkinterMapView(self.frame_right, corner_radius=0)
         self.map_widget.grid(row=1, rowspan=1, column=0, columnspan=3, sticky="nswe", padx=(0, 0), pady=(0, 0))
         #self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
-        self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1511geotiff/{z}/{x}/{y}")
+        self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1101geotiff/{z}/{x}/{y}")
 
         self.entry = customtkinter.CTkEntry(master=self.frame_right,
                                             placeholder_text="Digite Endereço")
@@ -414,8 +415,6 @@ class App(customtkinter.CTk):
                         # Rudder
                         rudder = int(value*40)
                         self.joystick_rudder_slider(rudder)
-
-
 
     def __init_inputs(self, joystick = False):
         """
@@ -607,14 +606,16 @@ class App(customtkinter.CTk):
             try:
                 self.path_autonomous.set_position_list(self.autonomous_points)
             except AttributeError:
-                self.path_autonomous = self.map_widget.set_path(self.autonomous_points)
+                self.path_autonomous = self.map_widget.set_path(self.autonomous_points,color='blue',width=0.5)
 
         #Definindo pontos da derrota como markers
         #Só adiciona pontos que não estão na lista
+        """
         for ponto in self.autonomous_points:
             if ponto not in self.marker_autonomous_list:
                 #self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text="#"+str(self.autonomous_points.index(ponto)+1)+" Ponto de derrota autônoma"))
                 self.marker_autonomous_list.append(self.map_widget.set_marker(ponto[0], ponto[1], text=f"#{self.autonomous_points.index(ponto)+1}"))
+        """     
 
     def destroy_autonomous(self):
         """
@@ -737,8 +738,9 @@ class App(customtkinter.CTk):
         self.slider_setpoint_heading.configure(command=self.update_setpoint_heading)
         self.slider_setpoint_heading.set(self.controller.heading_kp)
         
-        #Parâmetros do controle PID
+        #Parâmetros do controle PID de Heading
         #Label de cima
+        """
         self.label_machine1 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Controle PID Heading")
         self.label_machine1.configure(font=("Segoe UI", 25))
         self.label_machine1.grid(row=10, column=0, columnspan=2, padx=(10,20), pady=(10,5), sticky="n")
@@ -769,6 +771,7 @@ class App(customtkinter.CTk):
         self.slider_heading_kd.grid(row=16, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
         self.slider_heading_kd.configure(command=self.update_heading_kd)
         self.slider_heading_kd.set(self.controller.heading_kd)
+        """
         
         #Label de baixo
         self.label_machine2 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Sonar Sweep")
@@ -801,6 +804,8 @@ class App(customtkinter.CTk):
         self.slider_height.grid(row=23, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="")
         self.slider_height.configure(command=self.change_sweep_height)
         self.slider_height.set(self.sonar_sweep_height)      
+        
+        #Parâmetros do controle PID de Heading
         """
         self.label_machine1 = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Controle PID Speed")
         self.label_machine1.configure(font=("Segoe UI", 25))
@@ -1230,10 +1235,14 @@ class App(customtkinter.CTk):
     def add_mine(self,coords):
         """
         Add a Mine location in the Map
+        Coords is Lat, Long in decimal
         """
-        mina_image = ImageTk.PhotoImage(Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "mine.png")).resize((70, 70)))
+        #mina_image = ImageTk.PhotoImage(Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "mine.png")).resize((50, 50)))
         print("Adicionar Possível Mina:", coords)
-        mina_marker = self.map_widget.set_marker(coords[0], coords[1], text="Possível mina",image=mina_image)
+        #mina_marker = self.map_widget.set_marker(coords[0], coords[1], text="Possível mina",image=mina_image)
+        mina_marker = self.map_widget.set_marker(coords[0], coords[1], text="Possível mina", 
+                                                 marker_color_circle="green",
+                                                 marker_color_outside="yellow")
     
     def receive_sonar(self):
         """
@@ -1500,7 +1509,7 @@ class App(customtkinter.CTk):
         
         #Menu para escolha
         self.combobox = customtkinter.CTkOptionMenu(master=self.slider_progressbar_frame,
-                                       values=["Manual", "Joystick"],
+                                       values=["Manual", "Joystick", "ShipConsole"],
                                        command=self.optionmenu_callback)
         self.combobox.grid(row=10, column=0, rowspan=1,columnspan=2, padx=(5,10), pady=(0,205), sticky="")
 
@@ -1613,6 +1622,8 @@ class App(customtkinter.CTk):
         print("optionmenu dropdown clicked:", choice)
         if choice == "Joystick":
             self.__init_inputs(joystick = True)
+        elif choice == "ShipConsole":
+            self.__init_inputs(joystick = True)
         elif choice == "Manual":
             self.__init_inputs()
 
@@ -1656,7 +1667,8 @@ class App(customtkinter.CTk):
             if self.manual_control is True:
                 self.controller.notify_gear(value_gear)
                 print("DESIRED_GEAR: ", value_gear)
-
+        elif new_map == "1511 - BARRA DO RJ":
+            self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1511geotiff/{z}/{x}/{y}")
     ###################################################
     ### End of the functions for the Remote Control ###
     ###################################################
@@ -1746,6 +1758,8 @@ class App(customtkinter.CTk):
             self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
         elif new_map == "1511 - BARRA DO RJ":
             self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1511geotiff/{z}/{x}/{y}")
+        elif new_map == "1101 - PORTO SALVADOR":
+            self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1101geotiff/{z}/{x}/{y}")
         elif new_map == "1512 - PORTO DO RJ":
             self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1512geotiff/{z}/{x}/{y}")
         elif new_map == "1513 - TERMINAIS DA BAIA DE GUANABARA":
