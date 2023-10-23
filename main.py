@@ -27,8 +27,8 @@ plt.style.use('dark_background')
 
 # Configurations to access Moos server
 
-#IP_MOOS = "127.0.0.1" # Local
-IP_MOOS = "100.85.104.74" # pedrovsnt
+IP_MOOS = "127.0.0.1" # Local
+#IP_MOOS = "100.85.104.74" # pedrovsnt
 #IP_MOOS = "172.18.14.100" # pedro rede lancha
 PORTA_MOOS = 9000
 
@@ -266,7 +266,7 @@ class App(customtkinter.CTk):
         self.map_widget = TkinterMapView(self.frame_right, corner_radius=0)
         self.map_widget.grid(row=1, rowspan=1, column=0, columnspan=3, sticky="nswe", padx=(0, 0), pady=(0, 0))
         #self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
-        self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1101geotiff/{z}/{x}/{y}")
+        #self.map_widget.set_tile_server("http://localhost:3650/api/tiles/1101geotiff/{z}/{x}/{y}")
 
         self.entry = customtkinter.CTkEntry(master=self.frame_right,
                                             placeholder_text="Digite Endereço")
@@ -737,6 +737,34 @@ class App(customtkinter.CTk):
         self.slider_setpoint_heading.grid(row=9, column=0, columnspan=2, padx=0, pady=(5, 5), sticky="ew")
         self.slider_setpoint_heading.configure(command=self.update_setpoint_heading)
         self.slider_setpoint_heading.set(self.controller.heading_kp)
+
+        #Adicionar Possível Mina
+        self.label_mine = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text="Adicionar Possível Mina")
+        self.label_mine.configure(font=("Segoe UI", 25))
+        self.label_mine.grid(row=10, column=0, columnspan=2, padx=(10,20), pady=(10,5), sticky="n")
+
+        tmp_wid = 150
+        self.entry_mine_lat_grau = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Lat Grau",width=tmp_wid)
+        self.entry_mine_lat_grau.grid(row=11, column=0,  pady=(10,5), sticky="n")
+        self.entry_mine_lat_min = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Lat Min",width=tmp_wid)
+        self.entry_mine_lat_min.grid(row=12, column=0, pady=(10,5), sticky="n")
+        self.entry_mine_lat_seg = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Lat Seg",width=tmp_wid)
+        self.entry_mine_lat_seg.grid(row=13, column=0,  pady=(10,5), sticky="n")
+
+        self.entry_mine_long_grau = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Long Grau",width=tmp_wid)
+        self.entry_mine_long_grau.grid(row=11, column=1,  pady=(10,5), sticky="n")
+        self.entry_mine_long_min = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Long Min",width=tmp_wid)
+        self.entry_mine_long_min.grid(row=12, column=1,  pady=(10,5), sticky="n")
+        self.entry_mine_long_seg = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Long Seg",width=tmp_wid)
+        self.entry_mine_long_seg.grid(row=13, column=1, pady=(10,5), sticky="n")
+
+        #self.entry_mine_long = customtkinter.CTkEntry(master=self.slider_progressbar_frame1, placeholder_text="Long")
+        #self.entry_mine_long.grid(row=11, column=1, columnspan=1, padx=(10,20), pady=(10,5), sticky="n")
+
+        self.button_plot_mine = customtkinter.CTkButton(master=self.slider_progressbar_frame1,
+                                                text="Add Mine",
+                                                command=self.add_lat_long_mine)
+        self.button_plot_mine.grid(row=14, column=0, columnspan=2,pady=20)  
         
         #Parâmetros do controle PID de Heading
         #Label de cima
@@ -1243,6 +1271,33 @@ class App(customtkinter.CTk):
         mina_marker = self.map_widget.set_marker(coords[0], coords[1], text="Possível mina", 
                                                  marker_color_circle="green",
                                                  marker_color_outside="yellow")
+        
+    def add_lat_long_mine(self):
+        """
+        Add a Mine location in the Map
+        Coords is Lat, Long in decimal
+        """
+        mine_lat_grau = float(self.entry_mine_lat_grau.get())
+        mine_lat_min = float(self.entry_mine_lat_min.get())
+        mine_lat_seg = float(self.entry_mine_lat_seg.get())
+        mine_long_grau = float(self.entry_mine_long_grau.get())
+        mine_long_min = float(self.entry_mine_long_min.get())
+        mine_long_seg = float(self.entry_mine_long_seg.get())
+        #mina_image = ImageTk.PhotoImage(Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "mine.png")).resize((50, 50)))
+        print(f"Adicionar Possível Mina: {int(mine_lat_grau)}°{int(mine_lat_min)}'{mine_lat_seg}'', {int(mine_long_grau)}°{int(mine_long_min)}'{mine_long_seg}''")
+        #mina_marker = self.map_widget.set_marker(coords[0], coords[1], text="Possível mina",image=mina_image)
+        if mine_lat_grau < 0:
+            lat_mine = mine_lat_grau - mine_lat_min/60 - mine_lat_seg/3600
+        else:
+            lat_mine = mine_lat_grau + mine_lat_min/60 + mine_lat_seg/3600
+        if mine_long_grau < 0:
+            long_mine = mine_long_grau - mine_long_min/60 - mine_long_seg/3600
+        else:
+            long_mine = mine_long_grau + mine_long_min/60 + mine_long_seg/3600
+        #print(f"Adicionar Possível Mina: {int(mine_lat_grau)}°{int(mine_lat_min)}'{mine_lat_seg}'', {int(mine_long_grau)}°{int(mine_long_min)}'{mine_long_seg}''")
+        mina_marker = self.map_widget.set_marker(lat_mine, long_mine, text="Possível mina", 
+                                                 marker_color_circle="green",
+                                                 marker_color_outside="yellow")
     
     def receive_sonar(self):
         """
@@ -1686,9 +1741,9 @@ class App(customtkinter.CTk):
         
         #Cria o mapa
         
-        self.map_widget = TkinterMapView(self.frame_right, corner_radius=0,use_database_only=True,database_path=self.database_path)
+        #self.map_widget = TkinterMapView(self.frame_right, corner_radius=0,use_database_only=True,database_path=self.database_path)
         self.map_widget.grid(row=1, rowspan=1, column=0, columnspan=3, sticky="nswe", padx=(0, 0), pady=(0, 0))
-        self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
+        #self.map_widget.set_overlay_tile_server("http://tiles.openseamap.org/seamark//{z}/{x}/{y}.png")
         self.map_widget.set_zoom(15)     
         self.map_widget.set_position(self.controller.nav_lat,self.controller.nav_long) #Atualiza com a última posição do navio
 
