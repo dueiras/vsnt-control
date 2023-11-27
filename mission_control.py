@@ -264,6 +264,15 @@ class MissionControl(pymoos.comms):
         print(string_update)
         self.notify('END','false',pymoos.time())  
 
+    def set_auto_heading(self):
+        """
+        """
+        self.notify('DEPLOY', 'true',pymoos.time())
+        self.notify('MOOS_MANUAL_OVERIDE', 'false',pymoos.time())
+        self.notify('RETURN', 'false',pymoos.time())
+        self.notify('END','false',pymoos.time())  
+        self.notify('CONSTANT_HEADING','true',pymoos.time())
+
     def stop_autonomous_navigation(self):
         """
         Communicates pHelmIvP to stop the autonomous path

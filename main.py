@@ -27,13 +27,13 @@ plt.style.use('dark_background')
 
 # Configurations to access Moos server
 
-IP_MOOS = "127.0.0.1" # Local
+#IP_MOOS = "127.0.0.1" # Local
 #IP_MOOS = "100.85.104.74" # pedrovsnt
-#IP_MOOS = "172.18.14.100" # pedro rede lancha
+IP_MOOS = "172.18.14.100" # pedro rede lancha
 PORTA_MOOS = 9000
 
-LOCATION = "Salvador"
-#LOCATION = "Rio de Janeiro"
+#LOCATION = "Salvador"
+LOCATION = "Rio de Janeiro"
 #LOCATION = "MIT"
 
 # AIS configuration
@@ -380,10 +380,10 @@ class App(customtkinter.CTk):
         self.selected_plot_variables = []
 
         #Sonar Sweep
-        self.sonar_sweep_angle = 90
-        self.sonar_sweep_height = 300
+        self.sonar_sweep_angle = 209
+        self.sonar_sweep_height = 800
         self.sonar_sweep_width = 600
-        self.sonar_sweep_lane_width = 20
+        self.sonar_sweep_lane_width = 25
 
     def joystick_event_handler(self):
         # Initialize pygame
@@ -408,9 +408,14 @@ class App(customtkinter.CTk):
                     axis = event.axis
                     value = event.value
                     if axis == 5: 
-                        # Thrust
-                        thrust = value + 1
-                        self.joystick_thrust_slider(thrust)
+                        # Thrust positive
+                        thrust = 1
+                        #self.joystick_thrust_slider(thrust)
+                        self.increment_thrust_slider(None)
+                    elif axis == 2: 
+                        # Thrust negative
+                        thrust = -1
+                        self.decrement_thrust_slider(None)
                     elif axis == 0:
                         # Rudder
                         rudder = int(value*40)
@@ -434,6 +439,8 @@ class App(customtkinter.CTk):
             self.bind("<Down>", self.decrement_thrust_slider)
             self.bind("<Left>", self.decrement_rudder_slider)
             self.bind("<Right>", self.increment_rudder_slider)
+            self.bind("m", self.increment_heading_slider)
+            self.bind("n", self.decrement_heading_slider)
             self.bind("d", self.backward_gear)
             self.bind("s", self.neutral_gear)
             self.bind("a", self.forward_gear)  
@@ -684,20 +691,21 @@ class App(customtkinter.CTk):
 
         # Set desired speed for autonomous controller
 
-        self.label_desired_speed = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Desired Speed: {float(self.autonomous_speed)}knots")
+        self.label_desired_speed = customtkinter.CTkLabel(master=self.slider_progressbar_frame1, text=f"Desired Thrust: 0%")
         self.label_desired_speed.configure(font=("Segoe UI", 20))
         self.label_desired_speed.grid(row=3, column=0, columnspan=2, padx=0, pady=(15,5), sticky="")
         
-        self.slider_speed = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0, 
-                                                    to=self.max_autonomous_speed, 
-                                                    number_of_steps=self.max_autonomous_speed*2)
+        #self.slider_speed = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0,to=self.max_autonomous_speed,number_of_steps=self.max_autonomous_speed*2)
+        self.slider_speed = customtkinter.CTkSlider(self.slider_progressbar_frame1, from_=0,to=100,number_of_steps=100)
         self.slider_speed.grid(row=4, column=0, columnspan=2, padx=(50, 50), pady=(15, 5), sticky="ew")
-        self.slider_speed.configure(command=self.update_desired_speed)
-        self.slider_speed.set(self.autonomous_speed)
+        #self.slider_speed.configure(command=self.update_desired_speed)
+        self.slider_speed.configure(command=self.update_desired_thrust)
+        #self.slider_speed.set(self.controller.desired_thrust)
+        self.slider_speed.set(0)
 
-        self.speed_progressbar = customtkinter.CTkProgressBar(master=self.slider_progressbar_frame1,width=300)
-        self.speed_progressbar.grid(row=5, column=0, columnspan=2, padx=(50, 50), pady=(15, 15), sticky="ew")
-        self.speed_progressbar.set(self.controller.nav_speed/self.max_autonomous_speed)
+        #self.speed_progressbar = customtkinter.CTkProgressBar(master=self.slider_progressbar_frame1,width=300)
+        #self.speed_progressbar.grid(row=5, column=0, columnspan=2, padx=(50, 50), pady=(15, 15), sticky="ew")
+        #self.speed_progressbar.set(self.controller.nav_speed/self.max_autonomous_speed)
 
         # Set option for Plotting Variables
 
@@ -1069,6 +1077,15 @@ class App(customtkinter.CTk):
         #self.controller.set_desired_speed(desired_speed)
         self.label_desired_speed.configure(text=f"Desired Speed: {self.autonomous_speed}knots")
 
+    def update_desired_thrust(self,other):
+        """
+        Sends to Moos the desired thrust value and updates the GUI
+        """
+        desired_thrust = self.slider_speed.get()
+
+        self.controller.notify_thruster(desired_thrust)
+        self.label_desired_speed.configure(text=f"Desired Thrust: {self.controller.desired_thrust}%")
+
     def update_heading_kp(self,value):
         """
         Updates kp value in the control
@@ -1161,8 +1178,8 @@ class App(customtkinter.CTk):
         if self.check_var_constantheading.get() == "on":
             #Liguei o botão do heading constante, seto a variável para true no MOOS
             #Envio para o MOOS o valor da variável
-            print("constant heading botton on")
-            self.controller.notify('CONSTANT_HEADING','true',pymoos.time())
+            print("\nconstant heading botton on\n")
+            self.controller.set_auto_heading()
         else:
             self.controller.notify('CONSTANT_HEADING','false',pymoos.time())
             
@@ -1387,8 +1404,10 @@ class App(customtkinter.CTk):
             rudder_progress_value = ((self.controller.nav_yaw + 40)*1.25)/100
             self.rudder_progressbar.set(rudder_progress_value)
 
+        """
         if self.autonomous_control:
             self.speed_progressbar.set(self.controller.nav_speed/self.max_autonomous_speed)
+        """
 
         # Configure time to re-update GUI
         self.after(1000,self.update_gui) # 1sec
@@ -1641,6 +1660,24 @@ class App(customtkinter.CTk):
         self.slider_rudder.set(new_value)
         self.update_value_rudder(new_value)
 
+    def decrement_heading_slider(self, event):
+        """
+        Decrements the rudder slider GUI by 1
+        """
+        current_value = self.slider_setpoint_heading.get()
+        new_value = current_value - 1
+        self.slider_setpoint_heading.set(new_value)
+        self.update_setpoint_heading(new_value)
+
+    def increment_heading_slider(self, event):
+        """
+        Increments the rudder slider GUI by 1
+        """
+        current_value = self.slider_setpoint_heading.get()
+        new_value = current_value + 1
+        self.slider_setpoint_heading.set(new_value)
+        self.update_setpoint_heading(new_value)
+
     def decrement_thrust_slider(self, event):
         """
         Decrements the thrust slider GUI by 1
@@ -1693,6 +1730,7 @@ class App(customtkinter.CTk):
         if self.manual_control is True:
             self.controller.notify_thruster(value_thrust)
             print("DESIRED_THRUST: ", value_thrust)
+            
 
     def update_value_rudder(self,value):
         """
